@@ -18,7 +18,7 @@ class PolygonInterpolator:
 
     self.pairs = []
 
-    if len(pdest) > len(pstrt):
+    while len(pdest) > len(pstrt):
       pstrt += midpoints(pstrt)
 
     #Use hungarian algorithm to find the best set of match points
