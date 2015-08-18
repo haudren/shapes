@@ -1,22 +1,27 @@
 import shapely.geometry as geom
 import matplotlib.pyplot as plt
 from copy import copy
-from numpy import inf
+from numpy import inf, dot
 import math
 import munkres
+import scipy.spatial as spatial
+import numpy as np
 
 class PolygonInterpolator:
   def __init__(self, p1, p2):
     self.p1 = p1
     self.p2 = p2
+
     self.compute_interpolation()
+    self.compute_vertex_order()
 
   def compute_interpolation(self):
     done = set([])
+
     pstrt = [geom.Point(p) for p in self.p1.exterior.coords[:-1]]
     pdest = [geom.Point(p) for p in self.p2.exterior.coords[:-1]]
 
-    self.pairs = []
+    self.pairs, self.tuple_pairs = [], []
 
     while len(pdest) > len(pstrt):
       pstrt += midpoints(pstrt)
@@ -31,11 +36,28 @@ class PolygonInterpolator:
       p = pdest[i[0]]
       done.add(closest)
       self.pairs.append((closest, p))
+      self.tuple_pairs.append((as_tuple(closest), as_tuple(p)))
 
     #Match remaining start points to closest destination point
     for p in done.symmetric_difference(pstrt):
       closest, _ = project_point_points(p, pdest, 0)
       self.pairs.append((p, closest))
+      self.tuple_pairs.append((as_tuple(p), as_tuple(closest)))
+
+  def compute_vertex_order(self):
+    points = np.vstack(self.fast_interpolate_pairs(0.5))
+    hull = spatial.ConvexHull(points)
+    #bar = (sum([p[0][0] for p in self.tuple_pairs]),
+    #       sum([p[0][1] for p in self.tuple_pairs]))
+
+    #order_ccw = lambda p: math.atan2(p[0][1] - bar[1], p[0][0] - bar[0])
+    #order_ccw_p = lambda p: math.atan2(p[0].xy[1][0] - bar[1], p[0].xy[0][0] - bar[0])
+
+    #self.tuple_pairs = sorted(self.tuple_pairs, key=order_ccw)
+    #self.pairs = sorted(self.pairs, key=order_ccw_p)
+    self.order = hull.vertices
+    self.tuple_pairs = [self.tuple_pairs[i] for i in self.order]
+    self.pairs = [self.pairs[i] for i in self.order]
 
   def interpolate(self, percent):
     poly = []
@@ -45,6 +67,118 @@ class PolygonInterpolator:
       poly.append(as_tuple(interp))
 
     return geom.Polygon(poly).convex_hull
+
+  def fast_interpolate_pairs(self, percent):
+    perc = max(min(percent, 1.), -1.)
+    if perc < 0:
+      perc = 1 + perc
+    return [((t1[0]*(1-perc) + t2[0]*perc,
+              t1[1]*(1-perc) + t2[1]*perc))
+            for t1, t2 in self.tuple_pairs]
+
+  def fast_interpolate(self, percent):
+    pairs = self.fast_interpolate_pairs(percent)
+    return geom.Polygon(pairs).convex_hull
+
+  def point_derivative(self, epsilon_derivative):
+    return [point_derivative(p1, p2, epsilon_derivative)
+            for p1, p2 in self.pairs]
+
+  def pairs_derivative(self, epsilon_derivative):
+    return [tuple_derivative(p1, p2, epsilon_derivative)
+            for p1, p2 in self.tuple_pairs]
+
+  def midpoint_derivative(self, epsilon_derivative):
+    ps, pd = zip(*self.pairs)
+    m_strt = midpoints(ps)
+    m_dest = midpoints(pd)
+    return [point_derivative(m, n, epsilon_derivative)
+            for m, n in zip(m_strt, m_dest)]
+
+  def point_dist_derivative(self, point, percent, epsilon_derivative):
+    spd_points = self.pairs_derivative(epsilon_derivative)
+    #cur_poly = self.fast_interpolate(percent).exterior.coords
+    cur_poly = self.fast_interpolate_pairs(percent)
+    spd_segment = [None]*len(spd_points)
+
+    for i, p in enumerate(cur_poly):
+      p2 = cur_poly[i-1]
+      vec = (p[0] - p2[0], p[1] - p2[1])
+      vec_point = (point[0] - p2[0], point[1] - p2[1])
+      length = dot(vec, vec)
+      dist = dot(vec, vec_point)
+
+      spd_x = (spd_points[i-1][0]*dist+spd_points[i][0]*(length-dist))/length
+      spd_y = (spd_points[i-1][1]*dist+spd_points[i][1]*(length-dist))/length
+      #spd_y = spd_points[i-1][1]+spd_points[i][1]*dist/length
+
+      print vec
+      print vec_point
+      print spd_points[i-1], spd_points[i]
+      print length, dist
+      print spd_x, spd_y
+      print '---'
+      spd_segment[i] = (spd_x, spd_y)
+
+    return spd_segment
+
+  def projections(self, point, percent):
+    #cur_poly = self.fast_interpolate(percent)
+    cur_poly = self.fast_interpolate_pairs(percent)
+    #proj = [None]*(len(cur_poly.exterior.coords)-1)
+    proj = [None]*len(cur_poly)
+
+    for i, p in enumerate(cur_poly):
+      p_prec = cur_poly[i-1]
+      vec = (p[0] - p_prec[0],
+             p[1] - p_prec[1])
+      vec_point = (point[0] - p_prec[0],
+                   point[1] - p_prec[1])
+
+      dist = dot(vec_point, vec)
+      length = dot(vec, vec)
+
+      x = p_prec[0]+(dist*vec[0]/length)
+      y = p_prec[1]+(dist*vec[1]/length)
+
+      proj[i] = (x, y)
+
+    return proj
+
+  def normals_offset(self, percent):
+    points = self.fast_interpolate_pairs(percent)
+    normals = [None]*len(points)
+    offsets = [None]*len(points)
+
+    for i, p in enumerate(points):
+      p2 = points[i-1]
+      normals[i] = ()
+      normal = (-(p[1] - p2[1]), p[0] - p2[0])
+      norm = math.sqrt(normal[0]**2+normal[1]**2)
+      if norm > 0:
+        normal = (normal[0]/norm, normal[1]/norm)
+      else:
+        normal = (0.0, 0.0)
+      normals[i] = normal
+      offsets[i] = (-(normal[0]*p[0] + normal[1]*p[1]))
+    return normals, offsets
+
+  def normal_derivative(self, epsilon_derivative):
+    ps, pd = zip(*self.pairs)
+    poly_s = geom.Polygon([p.coords[0] for p in ps])
+    poly_d = geom.Polygon([p.coords[0] for p in pd])
+    n_strt, _ = normals_offset(poly_s)
+    n_dest, _ = normals_offset(poly_d)
+    return [tuple_derivative(n, m, epsilon_derivative)
+            if n != (0., 0.) and n_dest != (0., 0.)
+            else (0., 0.)
+            for n, m in zip(n_strt, n_dest)]
+
+def point_derivative(p1, p2, e_n):
+  return ((p2.x-p1.x)/e_n, (p2.y-p1.y)/e_n)
+
+def tuple_derivative(p1, p2, e_n):
+  return ((p2[0]-p1[0])/e_n, (p2[1]-p1[1])/e_n)
 
 def plot_polygons(polys):
   for p in polys:
@@ -145,7 +279,10 @@ def normals_offset(polygon):
   for i, p in enumerate(coords):
     normal = (p[1] - coords[i-1][1], -(p[0] - coords[i-1][0]))
     norm = math.sqrt(normal[0]**2+normal[1]**2)
-    normal = (normal[0]/norm, normal[1]/norm)
+    if norm > 0:
+      normal = (normal[0]/norm, normal[1]/norm)
+    else:
+      normal = (0.0, 0.0)
     n.append(normal)
     o.append(-(normal[0]*p[0] + normal[1]*p[1]))
   return n, o
