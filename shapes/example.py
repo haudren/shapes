@@ -4,12 +4,19 @@ import shapely.geometry as geom
 import numpy as np
 import matplotlib.animation as animation
 
-p1s = geom.Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+import scipy.spatial as spatial
+
+from copy import copy
+
+#p1s = geom.box(0, 0, 1, 1)
+#p2s = geom.box(-1, -1, 2, 2)
+
+p1s = geom.Polygon([(-0.5, 0.5), (0.5, -0.5), (1, 1.), (0, 1.5), (1, 0)]).convex_hull
 #p2s = geom.Polygon([(0, 0), (0, 1), (0.5, 1.5), (1, 1.5),
 #                    (1.5, 1.5), (1.5, 1.), (1, 0)])
-#p2s = geom.Polygon([(0, 0), (0, 1), (0.5, 1.5),
-#                    (1.5, 1.), (1, 0)])
-p2s = geom.Polygon([(0, 0), (0, 1), (0.5, 1.5), (1, 1), (1, 0)])
+p2s = geom.Polygon([(0, 0), (0, 1), (0.5, 1.5),
+                    (1.5, 1.), (1.4, 0.5), (1, 0)]).convex_hull
+#p2s = geom.Polygon([(0, 0), (0, 1), (0.5, 1.5), (1, 1), (1, 0)])
 #
 #lrpoly = geom.Polygon(zip([-0.07050964684556796, -0.07050964825832298, 0.10949034957097684, 0.10949034894607837, -0.07050964684556796], [-0.15499999638048872, 0.15499999203700351, 0.1549999968283623, -0.15499999600629497, -0.15499999638048872]))
 #
@@ -74,7 +81,7 @@ def save_polys(epsilons):
 
 
 def check_speeds():
-  perc = 0.3
+  perc = 0.0
   points = [(0.5, 0.5)]#, (0.5, 0), (0.5, 1.)]
 
   interp = PolygonInterpolator(p1s, p2s)
@@ -90,16 +97,15 @@ def check_speeds():
 
   pair_x, pair_y = zip(*pairs)
 
-  points_qhull = np.vstack(pairs)
-  qhull = spatial.ConvexHull(points_qhull)
-
   spd_x, spd_y = zip(*interp.point_derivative(1.))
   ax.quiver(pair_x, pair_y, spd_x, spd_y, color='r')
 
   for i, xy in enumerate(zip(pair_x, pair_y)):
     ax.annotate(str(i), xy)
 
-  normals, _ = interp.normals_offset(perc)
+  normals, offsets = interp.normals_offset(perc)
+  print normals, offsets
+  print normals_offset(poly)
   nx, ny = zip(*normals)
 
   for point in points:
@@ -203,5 +209,36 @@ def launch_animation():
                                 repeat=True)
   plt.show()
 
+def record_animation():
+  nr_steps = 500
+  interp = PolygonInterpolator(p1s, p2s)
+
+  for s in range(nr_steps+1):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, aspect='equal', autoscale_on=False,
+                         xlim=(-1.2, 2.2), ylim=(-1.2, 2.2))
+    cur_perc = float(s)/nr_steps
+    cur_poly = interp.fast_interpolate(cur_perc)
+    normals, _ = normals_offset(cur_poly)
+    mid = midpoints([geom.Point(pt) for pt in zip(*cur_poly.exterior.coords.xy)[:-1]])
+
+    x, y = zip(*[(pt.xy[0], pt.xy[1]) for pt in mid])
+    u, v = zip(*normals)
+
+    cur_x, cur_y = cur_poly.exterior.coords.xy
+    x_1, y_1 = p1s.exterior.coords.xy
+    x_2, y_2 = p2s.exterior.coords.xy
+
+    ax.plot(cur_x, cur_y, 'g-')
+    ax.plot(x_1, y_1, 'r')
+    ax.plot(x_2, y_2, 'b')
+
+    ax.quiver(x, y, u, v)
+
+    plt.savefig('figure_{0:03}.png'.format(s))
+    plt.close()
+
+
 if __name__ == '__main__':
+  #record_animation()
   check_speeds()
