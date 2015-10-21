@@ -112,12 +112,12 @@ class PolygonInterpolator:
       spd_y = (spd_points[i-1][1]*dist+spd_points[i][1]*(length-dist))/length
       #spd_y = spd_points[i-1][1]+spd_points[i][1]*dist/length
 
-      print vec
-      print vec_point
-      print spd_points[i-1], spd_points[i]
-      print length, dist
-      print spd_x, spd_y
-      print '---'
+      #print vec
+      #print vec_point
+      #print spd_points[i-1], spd_points[i]
+      #print length, dist
+      #print spd_x, spd_y
+      #print '---'
       spd_segment[i] = (spd_x, spd_y)
 
     return spd_segment
@@ -149,19 +149,31 @@ class PolygonInterpolator:
     points = self.fast_interpolate_pairs(percent)
     normals = [None]*len(points)
     offsets = [None]*len(points)
+    norms = [None]*len(points)
 
     for i, p in enumerate(points):
       p2 = points[i-1]
-      normals[i] = ()
       normal = (-(p[1] - p2[1]), p[0] - p2[0])
       norm = math.sqrt(normal[0]**2+normal[1]**2)
-      if norm > 0:
+      norms[i] = norm
+      if norm > 9e-3:
         normal = (normal[0]/norm, normal[1]/norm)
+        offset = -(normal[0]*p[0] + normal[1]*p[1])
       else:
         normal = (0.0, 0.0)
+        offset = 0
       normals[i] = normal
-      offsets[i] = (-(normal[0]*p[0] + normal[1]*p[1]))
+      offsets[i] = offset
+    print norms
     return normals, offsets
+
+  def perc_normal_derivative(self, epsilon_derivative):
+    n_strt, _ = self.normals_offset(0.)
+    n_dest, _ = self.normals_offset(1.)
+    return [tuple_derivative(n, m, epsilon_derivative)
+            if n != (0., 0.) and n_dest != (0., 0.)
+            else (0., 0.)
+            for n, m in zip(n_strt, n_dest)]
 
   def normal_derivative(self, epsilon_derivative):
     ps, pd = zip(*self.pairs)
