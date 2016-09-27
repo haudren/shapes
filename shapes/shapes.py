@@ -8,12 +8,15 @@ import scipy.spatial as spatial
 import numpy as np
 
 class PolygonInterpolator:
-  def __init__(self, p1, p2):
-    self.p1 = p1
-    self.p2 = p2
+  def __init__(self, p1 = None, p2 = None):
+    if p1 is not None and p2 is not None:
+      self.p1 = p1
+      self.p2 = p2
 
-    self.compute_interpolation()
-    self.compute_vertex_order()
+      self.compute_interpolation()
+      self.compute_vertex_order()
+    else:
+      pass
 
   def compute_interpolation(self):
     done = set([])
